@@ -1,46 +1,102 @@
-version: '3.8'
-
+version: "3.7"
 services:
-  car-scraping-api:
-    build: .
-    container_name: car-scraping-api
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
+
+## --------------------------- API SCRAPING CARS --------------------------- ##
+
+  car_scraping_api:
+    build: . ## Build local da imagem
+    container_name: car_scraping_api ## Nome do container
+    
+    networks:
+      - jnunesfiorimnet ## Nome da rede interna
+    
     environment:
+      ## 🌐 Configurações da API
       - NODE_ENV=production
       - PORT=3000
+      - TZ=America/Sao_Paulo
+      
+      ## 🔒 Configurações de Segurança
+      - CORS_ORIGIN=*
+      - RATE_LIMIT_POINTS=10
+      - RATE_LIMIT_DURATION=60
+      
+      ## 🚗 Configurações de Scraping
       - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-    volumes:
-      - ./logs:/app/logs
-      - ./data:/app/data
-    networks:
-      - car-scraping-network
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      - PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage
+      
+      ## 📊 Configurações de Performance
+      - MAX_REQUEST_SIZE=10mb
+      - REQUEST_TIMEOUT=30000
+      
+    ports:
+      - "3000:3000" ## Expor porta 3000 diretamente
+    
     deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
       resources:
         limits:
-          memory: 2G
-          cpus: '1.0'
+          cpus: "1"
+          memory: 2048M ## Mais memória para o Puppeteer
         reservations:
-          memory: 512M
-          cpus: '0.5'
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.car-scraping.rule=Host(`api-seusite.com`)"
-      - "traefik.http.routers.car-scraping.entrypoints=websecure"
-      - "traefik.http.routers.car-scraping.tls.certresolver=letsencrypt"
+          cpus: "0.5"
+          memory: 1024M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
 
-networks:
-  car-scraping-network:
-    driver: bridge
+## --------------------------- REDIS (OPCIONAL - PARA CACHE) --------------------------- ##
+
+  redis_cache:
+    image: redis:7-alpine ## Versão do Redis
+    container_name: redis_cache_cars
+    
+    networks:
+      - jnunesfiorimnet ## Nome da rede interna
+    
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    
+    volumes:
+      - redis_cache_data:/data ## Volume para persistência
+    
+    environment:
+      - TZ=America/Sao_Paulo
+      
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+## --------------------------- VOLUMES --------------------------- ##
 
 volumes:
-  logs:
-  data:
+  redis_cache_data: ## Volume para dados do Redis
+    driver: local
+
+## --------------------------- REDES --------------------------- ##
+
+networks:
+  jnunesfiorimnet: ## Nome da rede interna
+    external: true
+    name: jnunesfiorimnet ## Nome da rede interna
