@@ -1,5 +1,6 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
+const puppeteer = require('puppeteer');
 const { normalizeAd } = require('./scrapingService');
 
 /**
@@ -37,19 +38,26 @@ async function scrapeWebmotors(query, cidade, limit = 10) {
       'Referer': 'https://www.webmotors.com.br/'
     };
     
-    // Fazer requisição
-    const response = await axios.get(searchUrl, { 
-      headers,
-      timeout: 30000,
-      validateStatus: (status) => status < 500
-    });
-    
-    if (response.status !== 200) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    // Fazer requisição HTTP; se falhar/403, usar Puppeteer
+    let response;
+    try {
+      response = await axios.get(searchUrl, {
+        headers,
+        timeout: 30000,
+        validateStatus: (status) => status < 500,
+      });
+    } catch (httpErr) {
+      console.warn('⚠️ Webmotors: Falha HTTP, tentando Puppeteer...', httpErr.message);
     }
-    
+
+    let html = response && response.status === 200 ? response.data : null;
+    if (!html || (response && response.status === 403)) {
+      console.log('🕵️ Webmotors: Fallback com Puppeteer...');
+      html = await fetchHtmlWithPuppeteer(searchUrl, 'https://www.webmotors.com.br/');
+    }
+
     // Parsear HTML
-    const $ = cheerio.load(response.data);
+    const $ = cheerio.load(html || '');
     const ads = [];
     
     // Seletores específicos da Webmotors
@@ -78,6 +86,21 @@ async function scrapeWebmotors(query, cidade, limit = 10) {
         const href = $(el).attr('href');
         return href && href.includes('/carros/') && !href.includes('javascript:');
       });
+    }
+
+    // Reforço: se ainda não encontrar nada, refaça com Puppeteer e reparseie
+    if (!adElements || adElements.length === 0) {
+      console.log('🔄 Webmotors: Reforçando fallback (carregamento dinâmico) com Puppeteer...');
+      const htmlFallback = await fetchHtmlWithPuppeteer(searchUrl, 'https://www.webmotors.com.br/');
+      const $fallback = cheerio.load(htmlFallback || '');
+      for (const selector of adSelectors) {
+        const candidates = $fallback(selector);
+        if (candidates.length > 0) {
+          adElements = candidates;
+          console.log(`✅ Webmotors: Encontrados ${adElements.length} anúncios após fallback (seletor: ${selector})`);
+          break;
+        }
+      }
     }
     
     if (!adElements || adElements.length === 0) {
@@ -156,6 +179,46 @@ async function scrapeWebmotors(query, cidade, limit = 10) {
   } catch (error) {
     console.error(`❌ Webmotors: Erro no scraping:`, error.message);
     throw new Error(`Falha no scraping da Webmotors: ${error.message}`);
+  }
+}
+
+/**
+ * Obtém HTML com Puppeteer para contornar bloqueios 403 e conteúdo dinâmico
+ * @param {string} url
+ * @param {string} referer
+ * @returns {Promise<string>}
+ */
+async function fetchHtmlWithPuppeteer(url, referer) {
+  const launchArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+  ];
+
+  const browser = await puppeteer.launch({
+    args: launchArgs,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+    headless: 'new',
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+    );
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+      ...(referer ? { Referer: referer } : {}),
+    });
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
+    await page.waitForTimeout(1500);
+    return await page.content();
+  } catch (err) {
+    console.error('❌ Webmotors: Erro no fallback Puppeteer:', err.message);
+    return '';
+  } finally {
+    await browser.close();
   }
 }
 
