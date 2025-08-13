@@ -1,7 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const puppeteer = require('puppeteer');
-const { normalizeAd } = require('./scrapingService');
+const { normalizeAd } = require('./adUtils');
 
 /**
  * Scraper para a plataforma Webmotors
@@ -62,11 +62,13 @@ async function scrapeWebmotors(query, cidade, limit = 10) {
     
     // Seletores específicos da Webmotors
     const adSelectors = [
-      '[data-testid="card-vehicle"]', // Seletor principal
-      '.card-vehicle', // Seletor alternativo
-      '.vehicle-card', // Seletor alternativo 2
-      '[data-testid="vehicle-card"]', // Seletor de teste
-      '.card' // Seletor genérico
+      '[data-testid="card-vehicle"]',
+      '[data-testid="vehicle-card"]',
+      '[data-qa="vehicle-card"]',
+      '[data-qa="announcement-card"]',
+      '.vehicle-card',
+      '.card-vehicle',
+      '.card'
     ];
     
     let adElements = null;
@@ -120,10 +122,11 @@ async function scrapeWebmotors(query, cidade, limit = 10) {
         const location = $ad.find('[data-testid="vehicle-location"], .vehicle-location, .location').first().text().trim();
         
         // Extrair URL
-        let url = $ad.attr('href');
+        let url = $ad.find('a[href*="/carros/"]').attr('href') || $ad.attr('href');
         if (url && !url.startsWith('http')) {
           url = `https://www.webmotors.com.br${url}`;
         }
+        if (!url && !title) return;
         
         // Extrair imagem
         const image = $ad.find('img').first().attr('src') || 

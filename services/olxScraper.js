@@ -1,7 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const puppeteer = require('puppeteer');
-const { normalizeAd } = require('./scrapingService');
+const { normalizeAd } = require('./adUtils');
 
 /**
  * Scraper para a plataforma OLX
@@ -195,7 +195,7 @@ async function fetchHtmlWithPuppeteer(url, referer) {
       'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
       ...(referer ? { Referer: referer } : {}),
     });
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
     await page.waitForTimeout(1500);
     return await page.content();
   } catch (err) {

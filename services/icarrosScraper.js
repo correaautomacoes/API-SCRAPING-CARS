@@ -1,6 +1,6 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
-const { normalizeAd } = require('./scrapingService');
+const { normalizeAd } = require('./adUtils');
 
 /**
  * Scraper para a plataforma iCarros
@@ -97,7 +97,7 @@ async function scrapeICarros(query, cidade, limit = 10) {
         const location = $ad.find('[data-testid="vehicle-location"], .vehicle-location, .location, [class*="location"]').first().text().trim();
         
         // Extrair URL
-        let url = $ad.attr('href');
+        let url = $ad.find('a[href*="/comprar/"]').attr('href') || $ad.attr('href');
         if (url && !url.startsWith('http')) {
           url = `https://www.icarros.com.br${url}`;
         }
@@ -122,6 +122,11 @@ async function scrapeICarros(query, cidade, limit = 10) {
         // Extrair cor
         const color = $ad.find('[data-testid="vehicle-color"], .vehicle-color, .color, [class*="color"]').first().text().trim();
         
+        // Filtros para descartar cards falsos/placeholders
+        if (!url) return; // precisa ter link
+        if (title && title.toLowerCase().includes('ainda estamos construindo')) return;
+        if (image && image.includes('/comum/imagens/fakedoor_stories')) return;
+
         // Criar objeto do anúncio
         const ad = {
           id: `icarros_${Date.now()}_${index}`,
@@ -140,8 +145,9 @@ async function scrapeICarros(query, cidade, limit = 10) {
           scrapedAt: new Date().toISOString()
         };
         
-        // Só adicionar se tiver pelo menos título ou preço
-        if (ad.title !== 'Título não disponível' || ad.price !== 'Preço não informado') {
+        // Só adicionar se tiver pelo menos título ou preço numérico
+        const priceNum = (ad.price || '').replace(/[^\d]/g, '');
+        if (ad.title !== 'Título não disponível' || priceNum) {
           ads.push(normalizeAd(ad, 'iCarros'));
         }
         
